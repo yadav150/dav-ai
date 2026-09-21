@@ -1,47 +1,42 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Dav AI — an AI chatbot platform." />
   <title>Dav AI</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="./css/styles.css" />
 </head>
 <body>
-  <!-- Universal loader -->
-  <div id="global-loader" class="loader-overlay">
-    <div class="spinner"></div>
-  </div>
+  <div id="app">
+    <header class="app-header">
+      <h1>Dav AI</h1>
+      <div id="user-info" class="user-info" aria-live="polite"></div>
+    </header>
 
-  <!-- App root -->
-  <div id="app" class="app hidden">
-    <!-- Sidebar -->
-    <aside id="sidebar" class="sidebar">
-      <div class="sidebar-header">
-        <span class="brand">Dav AI</span>
-        <button id="new-chat-btn" class="btn-new-chat">New Chat</button>
-      </div>
-      <div id="chat-list" class="chat-list"></div>
-      <div class="sidebar-footer">
-        <button id="settings-btn" class="btn-settings">Settings</button>
-        <div id="profile-card" class="profile-card"></div>
-      </div>
-    </aside>
-
-    <!-- Main area -->
-    <main class="main">
-      <header class="header">
-        <button id="menu-toggle" class="menu-toggle" aria-label="Toggle sidebar">☰</button>
-        <h1 id="chat-title" class="chat-title">New Chat</h1>
-      </header>
-      <div id="chat-messages" class="chat-messages"></div>
-      <div class="input-bar">
-        <textarea id="user-input" class="user-input" placeholder="Type a message..." rows="1"></textarea>
-        <button id="send-btn" class="send-btn">Send</button>
-        <button id="stop-btn" class="stop-btn hidden">Stop</button>
+    <main class="chat-panel" aria-label="Chat">
+      <div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div>
+      <div id="empty-state" class="empty-state">
+        <p>Sign in to start chatting with Dav AI.</p>
       </div>
     </main>
+
+    <footer class="composer">
+      <form id="chat-form" autocomplete="off">
+        <label for="chat-input" class="visually-hidden">Message</label>
+        <input
+          id="chat-input"
+          type="text"
+          placeholder="Type a message…"
+          disabled
+          aria-label="Chat message input"
+        />
+        <button id="send-btn" type="submit" disabled>Send</button>
+      </form>
+      <p id="status" class="status" role="status"></p>
+    </footer>
   </div>
 
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="./js/app.js"></script>
 </body>
 </html>
