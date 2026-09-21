@@ -1,0 +1,46 @@
+# =========================================================
+# Dav AI — Cloudflare Worker config
+# =========================================================
+# Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+#
+# Deploy:     wrangler deploy        (from the cloudflare/ folder)
+# Dev:        wrangler dev
+# Secrets:    wrangler secret put GROQ_API_KEY
+#             wrangler secret put SEARCH_API_KEY   (Phase 5)
+# =========================================================
+
+name = "dav-ai-backend"
+main = "worker.js"
+compatibility_date = "2026-09-21"
+
+# Workers on the free plan run on the default Cloudflare domain:
+#   https://dav-ai-backend.<your-subdomain>.workers.dev
+# A custom route/domain can be added later in Phase 8.
+
+# ---------------------------------------------------------
+# Non-secret environment variables
+# ---------------------------------------------------------
+# These are visible in the Worker runtime as `env.*`.
+# NEVER put API keys here — use `wrangler secret put` instead.
+[vars]
+# Frontend origin allowed to call this Worker (CORS).
+# TODO: Replace with your real GitHub Pages URL once the repo is created.
+#   Example: "https://your-username.github.io"
+ALLOWED_ORIGIN = "http://localhost:8000"
+
+# Default model for Groq (Phase 4 will use this).
+# Valid IDs include: llama3-8b-8192, llama3-70b-8192, mixtral-8x7b-32768.
+GROQ_MODEL = "llama3-8b-8192"
+
+# ---------------------------------------------------------
+# Observability (optional, free tier friendly)
+# ---------------------------------------------------------
+[observability]
+enabled = true
+
+# ---------------------------------------------------------
+# Local development
+# ---------------------------------------------------------
+# `wrangler dev` reads secrets/vars from `.dev.vars` (gitignored).
+# Create cloudflare/.dev.vars locally with:
+#   GROQ_API_KEY="your-dev-key-here"
