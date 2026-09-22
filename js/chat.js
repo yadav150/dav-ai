@@ -230,6 +230,7 @@ async function sendMessage() {
 
     let replyText = "";
     let firstDelta = false;
+    let capturedSources = [];
 
     stopBtn.hidden = false;
     sendBtn.hidden = true;
@@ -260,6 +261,10 @@ async function sendMessage() {
                     if (autoScroll) scrollToBottom();
                 }
 
+                if (evt.type === "meta" && Array.isArray(evt.sources)) {
+                    capturedSources = evt.sources;
+                }
+
                 if (evt.type === "error") {
                     console.error("worker stream error:", evt);
                 }
@@ -288,12 +293,13 @@ async function sendMessage() {
         return;
     }
 
-    /* Final render — markdown HTML + copy button (in that order). */
+    /* Final render — markdown → copy button → sources. */
     renderAssistantMarkdown(assistantEl, replyText);
     addCopyButton(assistantEl, replyText);
+    renderSources(assistantEl, capturedSources);
 
     try {
-        await saveMessage(user.uid, currentChatId, "assistant", replyText);
+        await saveMessage(user.uid, currentChatId, "assistant", replyText, capturedSources);
     } catch (err) {
         console.error("save assistant message failed:", err);
     }
@@ -352,82 +358,127 @@ function escapeHtml(s) {
 
 function markdownToHtml(raw) {
 
-    let text = String(raw);
+    let text = String(raw || "");
 
-    /* Fenced code blocks */
+    /* 1. Fenced code blocks — extract first */
     const codeBlocks = [];
-    text = text.replace(/```([a-zA-Z0-9]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    text = text.replace(/```([a-zA-Z0-9]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
         const idx = codeBlocks.length;
         codeBlocks.push(
-            `<div class="code-block"><code>${escapeHtml(code.replace(/\n$/, ""))}</code></div>`
+            '<div class="code-block"><code>' +
+            escapeHtml(code.replace(/\n$/, "")) +
+            '</code></div>'
         );
         return "\u0000CODE" + idx + "\u0000";
     });
 
+    /* 2. Escape HTML */
     text = escapeHtml(text);
 
-    /* Headings */
-    text = text.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-    text = text.replace(/^## (.+)$/gm,  "<h2>$1</h2>");
-    text = text.replace(/^# (.+)$/gm,   "<h1>$1</h1>");
-
-    /* Bold + italic */
-    text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-
-    /* Inline code */
-    text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-    /* Links */
-    text = text.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
-        '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-    /* Tables */
+    /* 3. Tables — wrapped in horizontal-scroll container */
     text = text.replace(/((?:^\|.*\|\s*\n)+)/gm, (block) => {
         const lines = block.trim().split("\n");
         if (lines.length < 2) return block;
         if (!/^\|[\s:|-]+\|$/.test(lines[1])) return block;
+
         const header = lines[0].split("|").slice(1, -1).map(c => c.trim());
         const body = lines.slice(2).map(row =>
             row.split("|").slice(1, -1).map(c => c.trim())
         );
-        let html = "<table><thead><tr>";
-        header.forEach(h => html += `<th>${h}</th>`);
+
+        let html = '<div class="table-wrap"><table><thead><tr>';
+        header.forEach(h => { html += "<th>" + h + "</th>"; });
         html += "</tr></thead><tbody>";
         body.forEach(r => {
             html += "<tr>";
-            r.forEach(c => html += `<td>${c}</td>`);
+            r.forEach(c => { html += "<td>" + c + "</td>"; });
             html += "</tr>";
         });
-        html += "</tbody></table>";
-        return html;
+        html += "</tbody></table></div>";
+
+        return "\n\n" + html + "\n\n";
     });
 
-    /* Bullet lists */
-    text = text.replace(/(?:^- .+\n?)+/gm, (block) => {
-        const items = block.trim().split("\n")
-            .map(l => l.replace(/^- /, "").trim())
-            .map(i => `<li>${i}</li>`).join("");
-        return `<ul>${items}</ul>`;
-    });
+    /* 4. Headings */
+    text = text.replace(/^#### (.+)$/gm, "\n\n<h4>$1</h4>\n\n");
+    text = text.replace(/^### (.+)$/gm,  "\n\n<h3>$1</h3>\n\n");
+    text = text.replace(/^## (.+)$/gm,   "\n\n<h2>$1</h2>\n\n");
+    text = text.replace(/^# (.+)$/gm,    "\n\n<h1>$1</h1>\n\n");
 
-    /* Numbered lists */
-    text = text.replace(/(?:^\d+\. .+\n?)+/gm, (block) => {
-        const items = block.trim().split("\n")
-            .map(l => l.replace(/^\d+\. /, "").trim())
-            .map(i => `<li>${i}</li>`).join("");
-        return `<ol>${items}</ol>`;
-    });
+    /* 5. Lists — line-by-line so bold/italic don't fight bullets */
+    const lines = text.split("\n");
+    const out = [];
+    let listType = null;
 
-    /* Paragraphs */
+    const closeList = () => {
+        if (listType) {
+            out.push("</" + listType + ">");
+            out.push("");
+            listType = null;
+        }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        const ulMatch = line.match(/^ {0,3}[-*]\s+(.+)$/);
+        if (ulMatch) {
+            if (listType !== "ul") {
+                closeList();
+                out.push("");
+                out.push("<ul>");
+                listType = "ul";
+            }
+            out.push("<li>" + ulMatch[1] + "</li>");
+            continue;
+        }
+
+        const olMatch = line.match(/^ {0,3}\d+\.\s+(.+)$/);
+        if (olMatch) {
+            if (listType !== "ol") {
+                closeList();
+                out.push("");
+                out.push("<ol>");
+                listType = "ol";
+            }
+            out.push("<li>" + olMatch[1] + "</li>");
+            continue;
+        }
+
+        closeList();
+        out.push(line);
+    }
+    closeList();
+
+    text = out.join("\n");
+
+    /* 6. Bold */
+    text = text.replace(/\*\*([^*\n<>]+)\*\*/g, "<strong>$1</strong>");
+
+    /* 7. Italic */
+    text = text.replace(/(^|[^*<>])\*([^*\n<>]+)\*(?!\*)/g, "$1<em>$2</em>");
+
+    /* 8. Inline code */
+    text = text.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+
+    /* 9. Links */
+    text = text.replace(
+        /\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener">$1</a>'
+    );
+
+    /* 10. Groq citations 【N】 → clickable [N] */
+    text = text.replace(/【(\d+)】/g, '<a class="cite" href="#source-$1">[$1]</a>');
+
+    /* 11. Paragraphs */
     text = text.split(/\n{2,}/).map(seg => {
         const t = seg.trim();
         if (!t) return "";
-        if (/^<(h[1-3]|ul|ol|table|div|pre)/.test(t)) return t;
-        return `<p>${t.replace(/\n/g, "<br>")}</p>`;
-    }).join("");
+        if (/^<(h[1-6]|ul|ol|table|div|pre|blockquote)/.test(t)) return t;
+        return "<p>" + t.replace(/\n/g, "<br>") + "</p>";
+    }).join("\n");
 
-    /* Restore code blocks */
+    /* 12. Restore code blocks */
     text = text.replace(/\u0000CODE(\d+)\u0000/g, (_, i) => codeBlocks[+i] || "");
 
     return text;
@@ -456,6 +507,57 @@ function addCopyButton(assistantEl, text) {
     });
 
     contentEl.appendChild(btn);
+}
+
+
+/* ---------- SOURCES ---------- */
+
+function renderSources(assistantEl, sources) {
+    if (!Array.isArray(sources) || !sources.length) return;
+
+    const contentEl = assistantEl.querySelector(".message-content");
+    if (!contentEl) return;
+
+    /* Idempotent — remove existing block if re-rendered */
+    const existing = contentEl.querySelector(".sources-block");
+    if (existing) existing.remove();
+
+    const wrap = document.createElement("div");
+    wrap.className = "sources-block";
+
+    const title = document.createElement("div");
+    title.className = "sources-title";
+    title.textContent = "Sources";
+    wrap.appendChild(title);
+
+    const list = document.createElement("ol");
+    list.className = "sources-list";
+
+    sources.forEach((s, i) => {
+        const li = document.createElement("li");
+        li.id = "source-" + (i + 1);
+
+        const a = document.createElement("a");
+        a.href = s.url || "#";
+        a.target = "_blank";
+        a.rel = "noopener";
+
+        const t = document.createElement("span");
+        t.className = "source-title";
+        t.textContent = s.title || s.domain || "Source";
+
+        const d = document.createElement("span");
+        d.className = "source-domain";
+        d.textContent = s.domain || "";
+
+        a.appendChild(t);
+        a.appendChild(d);
+        li.appendChild(a);
+        list.appendChild(li);
+    });
+
+    wrap.appendChild(list);
+    contentEl.appendChild(wrap);
 }
 
 
@@ -575,9 +677,13 @@ async function createChat(uid) {
 }
 
 
-async function saveMessage(uid, chatId, role, text) {
+async function saveMessage(uid, chatId, role, text, sources) {
     const msgRef = push(chatMessagesRef(uid, chatId));
-    await set(msgRef, { role, text, ts: serverTimestamp() });
+    const payload = { role, text, ts: serverTimestamp() };
+    if (Array.isArray(sources) && sources.length) {
+        payload.sources = sources;
+    }
+    await set(msgRef, payload);
 
     const snap = await get(chatMetaRef(uid, chatId));
     const meta = snap.val() || {};
@@ -598,7 +704,13 @@ async function loadMessages(uid, chatId) {
     const out = [];
     snap.forEach((c) => {
         const v = c.val();
-        out.push({ id: c.key, role: v.role, text: v.text, ts: v.ts || 0 });
+        out.push({
+            id: c.key,
+            role: v.role,
+            text: v.text,
+            ts: v.ts || 0,
+            sources: Array.isArray(v.sources) ? v.sources : []
+        });
     });
     out.sort((a, b) => (a.ts || 0) - (b.ts || 0));
     return out;
@@ -763,13 +875,12 @@ async function loadChatIntoView(uid, chatId) {
             const el = addMessage("", "assistant");
             renderAssistantMarkdown(el, m.text);
             addCopyButton(el, m.text);
+            renderSources(el, m.sources);
         } else {
             addMessage(m.text, "user");
         }
     });
     renderingHistory = false;
-
-    scrollToBottom();
 }
 
 
