@@ -89,6 +89,7 @@ let menuTargetChatId  = null;
 let currentAbort      = null;
 let autoScroll        = true;
 let renderingHistory  = false;
+let lastErrorRetryable = false;
 
 let PREFERENCES = {
     responseStyle:  "balanced",
@@ -266,6 +267,48 @@ function dismissKeyboardOnMobile() {
     }
 }
 /* =========================================================
+   FRIENDLY ERROR MESSAGES
+   ========================================================= */
+
+function friendlyError(err) {
+    const raw = (err && err.message) || "";
+    const lower = raw.toLowerCase();
+
+    if (lower.includes("429") || lower.includes("rate limit") || lower.includes("too many")) {
+        return {
+            text: "Too many requests right now. Give it a moment, then try again.",
+            retry: true
+        };
+    }
+    if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("sign in")) {
+        return {
+            text: "Your session expired. Please sign in again.",
+            retry: false
+        };
+    }
+    if (lower.includes("502") || lower.includes("503") || lower.includes("ai provider")) {
+        return {
+            text: "The AI service is temporarily unavailable. Try again in a few seconds.",
+            retry: true
+        };
+    }
+    if (lower.includes("failed to fetch") || lower.includes("network")) {
+        return {
+            text: "Network issue. Check your connection and try again.",
+            retry: true
+        };
+    }
+    if (lower.includes("aborted") || lower.includes("abort")) {
+        return { text: "", retry: false };
+    }
+    return {
+        text: "Something went wrong. Try again in a moment.",
+        retry: true
+    };
+}
+
+
+/* =========================================================
    MOBILE KEYBOARD DISMISS
    ========================================================= */
 
@@ -279,7 +322,6 @@ function dismissKeyboardOnMobile() {
         messageInput.blur();
     }
 }
-
 
 /* =========================================================
    SEND MESSAGE
@@ -366,13 +408,15 @@ async function sendMessage() {
             }
         });
 
-    } catch (err) {
+        } catch (err) {
 
         if (err.name === "AbortError") {
             replyText += replyText ? "\n\n[stopped]" : "[stopped]";
         } else {
             console.error("streamChat failed:", err);
-            replyText = "Sorry — I could not respond. " + err.message;
+            const friendly = friendlyError(err);
+            replyText = friendly.text;
+            lastErrorRetryable = friendly.retry;
         }
         contentEl.textContent = replyText;
 
@@ -392,11 +436,38 @@ async function sendMessage() {
     renderAssistantMarkdown(assistantEl, replyText);
     addCopyButton(assistantEl, replyText);
 
+    /* If the failure is retryable, show a retry button. */
+    if (lastErrorRetryable) {
+        addRetryButton(assistantEl, text);
+        lastErrorRetryable = false;
+    }
+
     try {
         await saveMessage(user.uid, currentChatId, "assistant", replyText);
     } catch (err) {
         console.error("save assistant message failed:", err);
     }
+}
+
+
+function addRetryButton(assistantEl, originalText) {
+    const contentEl = assistantEl.querySelector(".message-content");
+    if (!contentEl || contentEl.querySelector(".retry-btn")) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "retry-btn";
+    btn.textContent = "Try again";
+
+    btn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        btn.remove();
+        messageInput.value = originalText;
+        sendBtn.disabled = false;
+        await sendMessage();
+    });
+
+    contentEl.appendChild(btn);
 }
 
 
