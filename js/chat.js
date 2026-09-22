@@ -1,6 +1,5 @@
 /* =========================================================
    DAV AI — CHAT CONTROLLER
-   Wired to Firebase Auth + Realtime DB + Cloudinary + Worker
    ========================================================= */
 
 import { auth, db } from "./firebase.js";
@@ -8,8 +7,7 @@ import { streamChat } from "./api.js";
 
 import {
     onAuthStateChanged,
-    signOut,
-    getIdToken
+    signOut
 }
 from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 
@@ -88,6 +86,7 @@ let chatsUnsub        = null;
 let menuTargetChatId  = null;
 let currentAbort      = null;
 let autoScroll        = true;
+let renderingHistory  = false;
 
 
 /* ---------- LOADER ---------- */
@@ -208,8 +207,6 @@ async function sendMessage() {
     messageInput.style.height = "auto";
     sendBtn.disabled = true;
 
-    updateChatTitle(text);
-
     /* Ensure chat exists + save user message */
     try {
         if (!currentChatId) {
@@ -260,7 +257,7 @@ async function sendMessage() {
                         ThinkingUI.hide();
                     }
                     replyText += evt.text;
-                    renderAssistantContent(contentEl, replyText);
+                    contentEl.textContent = replyText;
                     if (autoScroll) scrollToBottom();
                 }
 
@@ -274,12 +271,11 @@ async function sendMessage() {
 
         if (err.name === "AbortError") {
             replyText += replyText ? "\n\n[stopped]" : "[stopped]";
-            renderAssistantContent(contentEl, replyText);
         } else {
             console.error("streamChat failed:", err);
             replyText = "Sorry — I could not respond. " + err.message;
-            renderAssistantContent(contentEl, replyText);
         }
+        contentEl.textContent = replyText;
 
     } finally {
         ThinkingUI.hide();
@@ -293,6 +289,8 @@ async function sendMessage() {
         return;
     }
 
+    /* Final render — markdown HTML + copy button (in that order). */
+    renderAssistantMarkdown(assistantEl, replyText);
     addCopyButton(assistantEl, replyText);
 
     try {
@@ -321,36 +319,28 @@ function addMessage(text, role) {
 
     const content = document.createElement("div");
     content.className = "message-content";
-
-    if (role === "assistant") {
-        content.textContent = text;
-    } else {
-        content.textContent = text;
-    }
-
+    content.textContent = text;
     el.appendChild(content);
+
     messages.appendChild(el);
 
-    if (autoScroll) scrollToBottom();
+    if (autoScroll && !renderingHistory) scrollToBottom();
     return el;
 }
 
 
-/* Assistant content: textContent for streaming, but we render
-   markdown once streaming is done. During stream we use text. */
-function renderAssistantContent(contentEl, text) {
-    contentEl.textContent = text;
-}
-
 function renderAssistantMarkdown(assistantEl, text) {
     const contentEl = assistantEl.querySelector(".message-content");
+    /* Preserve any existing copy button if already appended */
+    const existingCopy = contentEl.querySelector(".copy-btn");
+    if (existingCopy) existingCopy.remove();
     contentEl.innerHTML = markdownToHtml(text);
+    if (autoScroll) scrollToBottom();
 }
 
 
 /* =========================================================
    MINIMAL MARKDOWN → HTML
-   Escapes HTML first, then applies markdown patterns.
    ========================================================= */
 
 function escapeHtml(s) {
@@ -365,7 +355,7 @@ function markdownToHtml(raw) {
 
     let text = String(raw);
 
-    /* Extract fenced code blocks first */
+    /* Fenced code blocks */
     const codeBlocks = [];
     text = text.replace(/```([a-zA-Z0-9]*)\n([\s\S]*?)```/g, (_, lang, code) => {
         const idx = codeBlocks.length;
@@ -375,7 +365,6 @@ function markdownToHtml(raw) {
         return "\u0000CODE" + idx + "\u0000";
     });
 
-    /* Escape everything else */
     text = escapeHtml(text);
 
     /* Headings */
@@ -394,12 +383,11 @@ function markdownToHtml(raw) {
     text = text.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
         '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
-    /* Simple tables: | a | b |\n|---|---|\n| c | d | */
+    /* Tables */
     text = text.replace(/((?:^\|.*\|\s*\n)+)/gm, (block) => {
         const lines = block.trim().split("\n");
         if (lines.length < 2) return block;
-        const isSep = /^\|[\s:|-]+\|$/.test(lines[1]);
-        if (!isSep) return block;
+        if (!/^\|[\s:|-]+\|$/.test(lines[1])) return block;
         const header = lines[0].split("|").slice(1, -1).map(c => c.trim());
         const body = lines.slice(2).map(row =>
             row.split("|").slice(1, -1).map(c => c.trim())
@@ -432,7 +420,7 @@ function markdownToHtml(raw) {
         return `<ol>${items}</ol>`;
     });
 
-    /* Paragraphs: double newlines */
+    /* Paragraphs */
     text = text.split(/\n{2,}/).map(seg => {
         const t = seg.trim();
         if (!t) return "";
@@ -450,6 +438,7 @@ function markdownToHtml(raw) {
 /* ---------- COPY BUTTON ---------- */
 
 function addCopyButton(assistantEl, text) {
+    const contentEl = assistantEl.querySelector(".message-content");
     const btn = document.createElement("button");
     btn.className = "copy-btn";
     btn.type = "button";
@@ -464,12 +453,10 @@ function addCopyButton(assistantEl, text) {
                 btn.textContent = "Copy";
                 btn.classList.remove("copied");
             }, 1400);
-        } catch {
-            /* clipboard blocked */
-        }
+        } catch {}
     });
 
-    assistantEl.querySelector(".message-content").appendChild(btn);
+    contentEl.appendChild(btn);
 }
 
 
@@ -544,15 +531,6 @@ chatArea.addEventListener("scroll", () => {
 
 
 /* =========================================================
-   TITLE
-   ========================================================= */
-
-function updateChatTitle(text) {
-    /* Sidebar title handled by watchChats */
-}
-
-
-/* =========================================================
    NEW CHAT
    ========================================================= */
 
@@ -580,9 +558,9 @@ newChatBtn.addEventListener("click", () => {
    DB HELPERS
    ========================================================= */
 
-function chatsRoot(uid)                { return ref(db, `users/${uid}/chats`); }
-function chatMetaRef(uid, id)          { return ref(db, `users/${uid}/chats/${id}/meta`); }
-function chatMessagesRef(uid, id)      { return ref(db, `users/${uid}/chats/${id}/messages`); }
+function chatsRoot(uid)           { return ref(db, `users/${uid}/chats`); }
+function chatMetaRef(uid, id)     { return ref(db, `users/${uid}/chats/${id}/meta`); }
+function chatMessagesRef(uid, id) { return ref(db, `users/${uid}/chats/${id}/messages`); }
 
 
 async function createChat(uid) {
@@ -718,7 +696,6 @@ chatHistory.addEventListener("click", async (e) => {
     item.classList.add("active");
 
     closeSidebar();
-
     await loadChatIntoView(user.uid, chatId);
 });
 
@@ -781,6 +758,7 @@ async function loadChatIntoView(uid, chatId) {
 
     welcome.style.display = "none";
 
+    renderingHistory = true;
     list.forEach((m) => {
         if (m.role === "assistant") {
             const el = addMessage("", "assistant");
@@ -790,6 +768,7 @@ async function loadChatIntoView(uid, chatId) {
             addMessage(m.text, "user");
         }
     });
+    renderingHistory = false;
 
     scrollToBottom();
 }
