@@ -91,7 +91,7 @@ let renderingHistory  = false;
 /* ---------- LOADER ---------- */
 
 function markReady() {
-    document.body.classList.add("app-ready");
+    /* Page now fades in via CSS animation — no JS needed. */
 }
 
 
