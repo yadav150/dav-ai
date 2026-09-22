@@ -207,8 +207,8 @@ body {
 }
 
 .sidebar-brand-img {
-    height: 28px;
-    max-width: 140px;
+    height: 40px;
+    max-width: 190px;
     width: auto;
     object-fit: contain;
     display: block;
