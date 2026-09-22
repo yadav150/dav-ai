@@ -169,15 +169,36 @@
                 </div>
             </div>
 
-            <div class="setting-section">
+                        <div class="setting-section">
                 <div class="setting-section-title">Preferences</div>
+
                 <div class="setting-row">
                     <span>Language</span>
-                    <span class="setting-value">Auto</span>
+                    <select class="setting-select" id="prefLanguage">
+                        <option value="auto">Auto (mirror me)</option>
+                        <option value="en">English</option>
+                        <option value="hi">Hindi</option>
+                        <option value="hi-en">Hinglish</option>
+                    </select>
                 </div>
+
                 <div class="setting-row">
-                    <span>Theme</span>
-                    <span class="setting-value">System</span>
+                    <span>Response style</span>
+                    <select class="setting-select" id="prefStyle">
+                        <option value="balanced">Balanced</option>
+                        <option value="concise">Concise</option>
+                        <option value="detailed">Detailed</option>
+                        <option value="exam">Exam-focused</option>
+                    </select>
+                </div>
+
+                <div class="setting-row">
+                    <span>Response length</span>
+                    <select class="setting-select" id="prefLength">
+                        <option value="medium">Medium</option>
+                        <option value="short">Short</option>
+                        <option value="long">Long</option>
+                    </select>
                 </div>
             </div>
 
