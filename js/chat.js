@@ -66,7 +66,6 @@ const profileEmailLarge = document.getElementById("profileEmailLarge");
 const accountName       = document.getElementById("accountName");
 const accountEmail      = document.getElementById("accountEmail");
 
-const prefLanguage      = document.getElementById("prefLanguage");
 const prefStyle         = document.getElementById("prefStyle");
 const prefLength        = document.getElementById("prefLength");
 
@@ -92,8 +91,7 @@ let autoScroll        = true;
 let renderingHistory  = false;
 
 let PREFERENCES = {
-    language:      "auto",
-    responseStyle: "balanced",
+    responseStyle:  "balanced",
     responseLength: "medium"
 };
 
@@ -114,7 +112,6 @@ async function loadPreferences(uid) {
         const snap = await get(ref(db, `users/${uid}/prefs`));
         if (snap.exists()) {
             const v = snap.val() || {};
-            PREFERENCES.language       = v.language       || "auto";
             PREFERENCES.responseStyle  = v.responseStyle  || "balanced";
             PREFERENCES.responseLength = v.responseLength || "medium";
         }
@@ -126,9 +123,8 @@ async function loadPreferences(uid) {
 
 
 function applyPreferencesToUI() {
-    if (prefLanguage) prefLanguage.value = PREFERENCES.language;
-    if (prefStyle)    prefStyle.value    = PREFERENCES.responseStyle;
-    if (prefLength)   prefLength.value   = PREFERENCES.responseLength;
+    if (prefStyle)  prefStyle.value  = PREFERENCES.responseStyle;
+    if (prefLength) prefLength.value = PREFERENCES.responseLength;
 }
 
 
@@ -137,7 +133,6 @@ async function savePreferences() {
     if (!user) return;
     try {
         await set(ref(db, `users/${user.uid}/prefs`), {
-            language:       PREFERENCES.language,
             responseStyle:  PREFERENCES.responseStyle,
             responseLength: PREFERENCES.responseLength,
             updatedAt:      serverTimestamp()
@@ -149,12 +144,6 @@ async function savePreferences() {
 
 
 function bindPreferenceInputs() {
-    if (prefLanguage) {
-        prefLanguage.addEventListener("change", () => {
-            PREFERENCES.language = prefLanguage.value;
-            savePreferences();
-        });
-    }
     if (prefStyle) {
         prefStyle.addEventListener("change", () => {
             PREFERENCES.responseStyle = prefStyle.value;
@@ -320,7 +309,6 @@ async function sendMessage() {
         await streamChat({
             messages: history.map(m => ({ role: m.role, content: m.text })),
             settings: {
-                language:       PREFERENCES.language,
                 responseStyle:  PREFERENCES.responseStyle,
                 responseLength: PREFERENCES.responseLength
             },
