@@ -30,7 +30,6 @@ const PROFILE = { name: "User", email: "", initials: "U" };
 
 /* ---------- DOM ---------- */
 
-const pageLoader      = document.getElementById("pageLoader");
 const sidebar         = document.getElementById("sidebar");
 const sidebarScrim    = document.getElementById("sidebarScrim");
 const sidebarClose    = document.getElementById("sidebarClose");
@@ -92,7 +91,7 @@ let renderingHistory  = false;
 /* ---------- LOADER ---------- */
 
 function markReady() {
-    if (pageLoader) pageLoader.classList.add("is-hidden");
+    document.body.classList.add("app-ready");
 }
 
 
