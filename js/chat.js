@@ -230,7 +230,6 @@ async function sendMessage() {
 
     let replyText = "";
     let firstDelta = false;
-    let capturedSources = [];
 
     stopBtn.hidden = false;
     sendBtn.hidden = true;
@@ -261,10 +260,6 @@ async function sendMessage() {
                     if (autoScroll) scrollToBottom();
                 }
 
-                if (evt.type === "meta" && Array.isArray(evt.sources)) {
-                    capturedSources = evt.sources;
-                }
-
                 if (evt.type === "error") {
                     console.error("worker stream error:", evt);
                 }
@@ -293,13 +288,12 @@ async function sendMessage() {
         return;
     }
 
-    /* Final render — markdown → copy button → sources. */
+    /* Final render — markdown → copy button. */
     renderAssistantMarkdown(assistantEl, replyText);
     addCopyButton(assistantEl, replyText);
-    renderSources(assistantEl, capturedSources);
 
     try {
-        await saveMessage(user.uid, currentChatId, "assistant", replyText, capturedSources);
+        await saveMessage(user.uid, currentChatId, "assistant", replyText);
     } catch (err) {
         console.error("save assistant message failed:", err);
     }
@@ -375,7 +369,7 @@ function markdownToHtml(raw) {
     /* 2. Escape HTML */
     text = escapeHtml(text);
 
-    /* 3. Tables — wrapped in horizontal-scroll container */
+    /* 3. Tables — plain, no wrapper, no scroll */
     text = text.replace(/((?:^\|.*\|\s*\n)+)/gm, (block) => {
         const lines = block.trim().split("\n");
         if (lines.length < 2) return block;
@@ -386,7 +380,7 @@ function markdownToHtml(raw) {
             row.split("|").slice(1, -1).map(c => c.trim())
         );
 
-        let html = '<div class="table-wrap"><table><thead><tr>';
+        let html = "<table><thead><tr>";
         header.forEach(h => { html += "<th>" + h + "</th>"; });
         html += "</tr></thead><tbody>";
         body.forEach(r => {
@@ -394,7 +388,7 @@ function markdownToHtml(raw) {
             r.forEach(c => { html += "<td>" + c + "</td>"; });
             html += "</tr>";
         });
-        html += "</tbody></table></div>";
+        html += "</tbody></table>";
 
         return "\n\n" + html + "\n\n";
     });
@@ -507,57 +501,6 @@ function addCopyButton(assistantEl, text) {
     });
 
     contentEl.appendChild(btn);
-}
-
-
-/* ---------- SOURCES ---------- */
-
-function renderSources(assistantEl, sources) {
-    if (!Array.isArray(sources) || !sources.length) return;
-
-    const contentEl = assistantEl.querySelector(".message-content");
-    if (!contentEl) return;
-
-    /* Idempotent — remove existing block if re-rendered */
-    const existing = contentEl.querySelector(".sources-block");
-    if (existing) existing.remove();
-
-    const wrap = document.createElement("div");
-    wrap.className = "sources-block";
-
-    const title = document.createElement("div");
-    title.className = "sources-title";
-    title.textContent = "Sources";
-    wrap.appendChild(title);
-
-    const list = document.createElement("ol");
-    list.className = "sources-list";
-
-    sources.forEach((s, i) => {
-        const li = document.createElement("li");
-        li.id = "source-" + (i + 1);
-
-        const a = document.createElement("a");
-        a.href = s.url || "#";
-        a.target = "_blank";
-        a.rel = "noopener";
-
-        const t = document.createElement("span");
-        t.className = "source-title";
-        t.textContent = s.title || s.domain || "Source";
-
-        const d = document.createElement("span");
-        d.className = "source-domain";
-        d.textContent = s.domain || "";
-
-        a.appendChild(t);
-        a.appendChild(d);
-        li.appendChild(a);
-        list.appendChild(li);
-    });
-
-    wrap.appendChild(list);
-    contentEl.appendChild(wrap);
 }
 
 
@@ -875,7 +818,6 @@ async function loadChatIntoView(uid, chatId) {
             const el = addMessage("", "assistant");
             renderAssistantMarkdown(el, m.text);
             addCopyButton(el, m.text);
-            renderSources(el, m.sources);
         } else {
             addMessage(m.text, "user");
         }
