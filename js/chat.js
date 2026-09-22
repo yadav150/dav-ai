@@ -249,7 +249,36 @@ messageInput.addEventListener("keydown", (e) => {
 sendBtn.addEventListener("click", sendMessage);
 stopBtn.addEventListener("click", () => {
     if (currentAbort) currentAbort.abort();
+    dismissKeyboardOnMobile();
 });
+
+
+/* Dismiss the mobile keyboard after send so the user can read the reply.
+   Desktop keeps focus so typing continues uninterrupted. */
+function isMobileViewport() {
+    return window.matchMedia("(max-width: 700px)").matches
+        || (navigator.maxTouchPoints > 0 && window.innerWidth <= 700);
+}
+
+function dismissKeyboardOnMobile() {
+    if (isMobileViewport() && document.activeElement === messageInput) {
+        messageInput.blur();
+    }
+}
+/* =========================================================
+   MOBILE KEYBOARD DISMISS
+   ========================================================= */
+
+function isMobileViewport() {
+    return window.matchMedia("(max-width: 700px)").matches
+        || (navigator.maxTouchPoints > 0 && window.innerWidth <= 700);
+}
+
+function dismissKeyboardOnMobile() {
+    if (isMobileViewport() && document.activeElement === messageInput) {
+        messageInput.blur();
+    }
+}
 
 
 /* =========================================================
@@ -271,6 +300,8 @@ async function sendMessage() {
     messageInput.value = "";
     messageInput.style.height = "auto";
     sendBtn.disabled = true;
+
+    dismissKeyboardOnMobile();
 
     /* Ensure chat exists + save user message */
     try {
