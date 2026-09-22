@@ -429,7 +429,9 @@ body {
     font-size: 14px;
     line-height: 1.5;
     word-break: break-word;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
+    overflow-x: hidden;
 }
 
 #messages .message.user .message-content {
@@ -446,6 +448,7 @@ body {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     max-width: 84%;
     white-space: normal;
+    overflow-x: hidden;
 }
 
 .ai-icon {
@@ -516,6 +519,7 @@ body {
     color: #2d3338;
     overflow-x: auto;
     white-space: pre;
+    max-width: 100%;
 }
 
 .code-block code {
@@ -996,14 +1000,204 @@ body {
 }
 
 
-/* =========================================================
-   SMALL PHONES
-   ========================================================= */
-
 @media (max-width: 380px) {
     .chat-area { padding: 16px 12px 100px; }
     .message-content { max-width: 88%; font-size: 13.5px; }
     .composer { bottom: 8px; width: calc(100vw - 16px); }
     .brand-logo { height: 34px; max-width: 150px; }
     .welcome-logo { height: 60px; }
+}
+
+
+/* =========================================================
+   TABLE — only tables may horizontally scroll
+   ========================================================= */
+
+.table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 10px 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    -webkit-overflow-scrolling: touch;
+}
+
+.table-wrap table {
+    width: 100%;
+    min-width: max-content;
+    border-collapse: collapse;
+    font-size: 12.5px;
+}
+
+.table-wrap th,
+.table-wrap td {
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+    line-height: 1.45;
+    color: var(--text-2);
+}
+
+.table-wrap th:last-child,
+.table-wrap td:last-child {
+    border-right: 0;
+}
+
+.table-wrap tr:last-child td {
+    border-bottom: 0;
+}
+
+.table-wrap thead th {
+    background: #f1f3f4;
+    font-weight: 600;
+    color: var(--header);
+    white-space: nowrap;
+}
+
+.table-wrap tbody tr:nth-child(even) td {
+    background: #fafbfc;
+}
+
+
+/* =========================================================
+   INLINE CITATION LINK — [1] [2]
+   ========================================================= */
+
+.message-content .cite {
+    display: inline-block;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 5px;
+    margin: 0 1px;
+    border-radius: 4px;
+    background: #eef0f2;
+    color: var(--header);
+    text-decoration: none;
+    font-weight: 600;
+    vertical-align: 1px;
+    transition: background 0.14s ease;
+}
+
+.message-content .cite:hover {
+    background: #dce2e6;
+    text-decoration: none;
+}
+
+
+/* =========================================================
+   SOURCES BLOCK — under AI replies
+   ========================================================= */
+
+.sources-block {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+.sources-title {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    margin-bottom: 8px;
+}
+
+.sources-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    counter-reset: src;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.sources-list li {
+    counter-increment: src;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    line-height: 1.4;
+}
+
+.sources-list li::before {
+    content: "[" counter(src) "]";
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    min-width: 22px;
+}
+
+.sources-list a {
+    color: var(--text-2);
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+    transition: color 0.14s ease;
+}
+
+.sources-list a:hover {
+    color: var(--header);
+}
+
+.source-title {
+    font-weight: 500;
+    color: inherit;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    word-break: break-word;
+}
+
+.source-domain {
+    font-size: 11px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* =========================================================
+   RESPONSIVE — heading sizes and citation scaling
+   ========================================================= */
+
+@media (max-width: 480px) {
+    .table-wrap {
+        border-radius: 6px;
+        margin: 8px 0;
+    }
+
+    .table-wrap th,
+    .table-wrap td {
+        padding: 7px 10px;
+        font-size: 12px;
+    }
+
+    .sources-block {
+        margin-top: 12px;
+        padding-top: 10px;
+        font-size: 12px;
+    }
+
+    .source-title {
+        -webkit-line-clamp: 3;
+        line-clamp: 3;
+    }
 }
