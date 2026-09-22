@@ -66,6 +66,10 @@ const profileEmailLarge = document.getElementById("profileEmailLarge");
 const accountName       = document.getElementById("accountName");
 const accountEmail      = document.getElementById("accountEmail");
 
+const prefLanguage      = document.getElementById("prefLanguage");
+const prefStyle         = document.getElementById("prefStyle");
+const prefLength        = document.getElementById("prefLength");
+
 const changePictureBtn  = document.getElementById("changePictureBtn");
 const avatarInput       = document.getElementById("avatarInput");
 const uploadOverlay     = document.getElementById("uploadOverlay");
@@ -87,12 +91,85 @@ let currentAbort      = null;
 let autoScroll        = true;
 let renderingHistory  = false;
 
+let PREFERENCES = {
+    language:      "auto",
+    responseStyle: "balanced",
+    responseLength: "medium"
+};
+
 
 /* ---------- LOADER ---------- */
 
 function markReady() {
     /* Page now fades in via CSS animation — no JS needed. */
 }
+
+
+/* =========================================================
+   PREFERENCES
+   ========================================================= */
+
+async function loadPreferences(uid) {
+    try {
+        const snap = await get(ref(db, `users/${uid}/prefs`));
+        if (snap.exists()) {
+            const v = snap.val() || {};
+            PREFERENCES.language       = v.language       || "auto";
+            PREFERENCES.responseStyle  = v.responseStyle  || "balanced";
+            PREFERENCES.responseLength = v.responseLength || "medium";
+        }
+    } catch (err) {
+        console.warn("prefs load failed:", err.message);
+    }
+    applyPreferencesToUI();
+}
+
+
+function applyPreferencesToUI() {
+    if (prefLanguage) prefLanguage.value = PREFERENCES.language;
+    if (prefStyle)    prefStyle.value    = PREFERENCES.responseStyle;
+    if (prefLength)   prefLength.value   = PREFERENCES.responseLength;
+}
+
+
+async function savePreferences() {
+    const user = auth.currentUser;
+    if (!user) return;
+    try {
+        await set(ref(db, `users/${user.uid}/prefs`), {
+            language:       PREFERENCES.language,
+            responseStyle:  PREFERENCES.responseStyle,
+            responseLength: PREFERENCES.responseLength,
+            updatedAt:      serverTimestamp()
+        });
+    } catch (err) {
+        console.error("prefs save failed:", err.message);
+    }
+}
+
+
+function bindPreferenceInputs() {
+    if (prefLanguage) {
+        prefLanguage.addEventListener("change", () => {
+            PREFERENCES.language = prefLanguage.value;
+            savePreferences();
+        });
+    }
+    if (prefStyle) {
+        prefStyle.addEventListener("change", () => {
+            PREFERENCES.responseStyle = prefStyle.value;
+            savePreferences();
+        });
+    }
+    if (prefLength) {
+        prefLength.addEventListener("change", () => {
+            PREFERENCES.responseLength = prefLength.value;
+            savePreferences();
+        });
+    }
+}
+
+bindPreferenceInputs();
 
 
 /* =========================================================
@@ -242,7 +319,11 @@ async function sendMessage() {
 
         await streamChat({
             messages: history.map(m => ({ role: m.role, content: m.text })),
-            settings: {},
+            settings: {
+                language:       PREFERENCES.language,
+                responseStyle:  PREFERENCES.responseStyle,
+                responseLength: PREFERENCES.responseLength
+            },
             signal: currentAbort.signal,
             onEvent: (evt) => {
 
@@ -846,6 +927,7 @@ onAuthStateChanged(auth, (user) => {
     chatsUnsub = watchChats(user.uid, renderChatList);
 
     loadAvatarFromDB(user.uid);
+    loadPreferences(user.uid);
 
     markReady();
 });
