@@ -403,7 +403,53 @@ function renderAssistantMarkdown(assistantEl, text) {
     const existingCopy = contentEl.querySelector(".copy-btn");
     if (existingCopy) existingCopy.remove();
     contentEl.innerHTML = markdownToHtml(text);
+    enhanceCodeBlocks(contentEl);
     if (autoScroll) scrollToBottom();
+}
+
+
+/* =========================================================
+   PER-CODE-BLOCK COPY BUTTON
+   ========================================================= */
+
+function enhanceCodeBlocks(contentEl) {
+    if (!contentEl) return;
+
+    contentEl.querySelectorAll(".code-block").forEach((block) => {
+
+        if (block.querySelector(".code-copy-btn")) return;
+
+        const codeEl = block.querySelector("code");
+        if (!codeEl) return;
+
+        const raw = codeEl.textContent || "";
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "code-copy-btn";
+        btn.textContent = "Copy";
+        btn.setAttribute("aria-label", "Copy code");
+
+        btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            try {
+                await navigator.clipboard.writeText(raw);
+                btn.textContent = "Copied";
+                btn.classList.add("copied");
+                setTimeout(() => {
+                    btn.textContent = "Copy";
+                    btn.classList.remove("copied");
+                }, 1400);
+            } catch (err) {
+                btn.textContent = "Failed";
+                setTimeout(() => { btn.textContent = "Copy"; }, 1400);
+            }
+        });
+
+        block.appendChild(btn);
+    });
 }
 
 
@@ -886,6 +932,7 @@ async function loadChatIntoView(uid, chatId) {
         if (m.role === "assistant") {
             const el = addMessage("", "assistant");
             renderAssistantMarkdown(el, m.text);
+            enhanceCodeBlocks(el.querySelector(".message-content"));
             addCopyButton(el, m.text);
         } else {
             addMessage(m.text, "user");
