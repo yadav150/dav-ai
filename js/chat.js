@@ -307,22 +307,6 @@ function friendlyError(err) {
     };
 }
 
-
-/* =========================================================
-   MOBILE KEYBOARD DISMISS
-   ========================================================= */
-
-function isMobileViewport() {
-    return window.matchMedia("(max-width: 700px)").matches
-        || (navigator.maxTouchPoints > 0 && window.innerWidth <= 700);
-}
-
-function dismissKeyboardOnMobile() {
-    if (isMobileViewport() && document.activeElement === messageInput) {
-        messageInput.blur();
-    }
-}
-
 /* =========================================================
    SEND MESSAGE
    ========================================================= */
