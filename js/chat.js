@@ -1,0 +1,997 @@
+/* =========================================================
+   DAV AI — CHAT CONTROLLER
+   Wired to Firebase Auth + Realtime DB + Cloudinary + Worker
+   ========================================================= */
+
+import { auth, db } from "./firebase.js";
+import { streamChat } from "./api.js";
+
+import {
+    onAuthStateChanged,
+    signOut,
+    getIdToken
+}
+from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+
+import {
+    ref, push, set, get, update, remove,
+    onValue, serverTimestamp
+}
+from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
+
+
+/* ---------- CONSTANTS ---------- */
+
+const PRODUCT_NAME       = "DavAI";
+const CLOUDINARY_CLOUD   = "xgkqlvgt";
+const CLOUDINARY_PRESET  = "davai_hosting";
+const INACTIVITY_MS      = 5 * 60 * 1000;
+
+const PROFILE = { name: "User", email: "", initials: "U" };
+
+
+/* ---------- DOM ---------- */
+
+const pageLoader      = document.getElementById("pageLoader");
+const sidebar         = document.getElementById("sidebar");
+const sidebarScrim    = document.getElementById("sidebarScrim");
+const sidebarClose    = document.getElementById("sidebarClose");
+const menuBtn         = document.getElementById("menuBtn");
+
+const newChatBtn      = document.getElementById("newChatBtn");
+const chatHistory     = document.getElementById("chatHistory");
+const chatMenu        = document.getElementById("chatMenu");
+const deleteChatBtn   = document.getElementById("deleteChatBtn");
+
+const settingsBtn     = document.getElementById("settingsBtn");
+const profileBtn      = document.getElementById("profileBtn");
+const profileBtnTop   = document.getElementById("profileBtnTop");
+const settingsOverlay = document.getElementById("settingsOverlay");
+const closeSettings   = document.getElementById("closeSettings");
+
+const chatArea        = document.getElementById("chatArea");
+const messages        = document.getElementById("messages");
+const welcome         = document.getElementById("welcome");
+const thinking        = document.getElementById("thinking");
+const thinkingLabel   = document.getElementById("thinkingLabel");
+
+const messageInput    = document.getElementById("messageInput");
+const sendBtn         = document.getElementById("sendBtn");
+const stopBtn         = document.getElementById("stopBtn");
+
+const avatarTop       = document.getElementById("avatarTop");
+const avatarSmall     = document.getElementById("avatarSmall");
+const avatarLarge     = document.getElementById("avatarLarge");
+const profileNameSmall  = document.getElementById("profileNameSmall");
+const profileEmailSmall = document.getElementById("profileEmailSmall");
+const profileNameLarge  = document.getElementById("profileNameLarge");
+const profileEmailLarge = document.getElementById("profileEmailLarge");
+const accountName       = document.getElementById("accountName");
+const accountEmail      = document.getElementById("accountEmail");
+
+const changePictureBtn  = document.getElementById("changePictureBtn");
+const avatarInput       = document.getElementById("avatarInput");
+const uploadOverlay     = document.getElementById("uploadOverlay");
+const uploadBar         = document.getElementById("uploadBar");
+const uploadLabel       = document.getElementById("uploadLabel");
+
+const logoutBtn       = document.getElementById("logoutBtn");
+const logoutModal     = document.getElementById("logoutModal");
+const cancelLogout    = document.getElementById("cancelLogout");
+const confirmLogout   = document.getElementById("confirmLogout");
+
+
+/* ---------- STATE ---------- */
+
+let currentChatId     = null;
+let chatsUnsub        = null;
+let menuTargetChatId  = null;
+let currentAbort      = null;
+let autoScroll        = true;
+
+
+/* ---------- LOADER ---------- */
+
+function markReady() {
+    if (pageLoader) pageLoader.classList.add("is-hidden");
+}
+
+
+/* =========================================================
+   SIDEBAR
+   ========================================================= */
+
+function openSidebar() {
+    sidebar.classList.add("open");
+    sidebarScrim.classList.add("show");
+}
+
+function closeSidebar() {
+    sidebar.classList.remove("open");
+    sidebarScrim.classList.remove("show");
+}
+
+menuBtn.addEventListener("click", openSidebar);
+sidebarClose.addEventListener("click", closeSidebar);
+sidebarScrim.addEventListener("click", closeSidebar);
+
+
+/* =========================================================
+   SETTINGS
+   ========================================================= */
+
+function openSettings() {
+    settingsOverlay.classList.add("show");
+    closeSidebar();
+}
+
+function closeSettingsPanel() {
+    settingsOverlay.classList.remove("show");
+}
+
+settingsBtn.addEventListener("click", openSettings);
+profileBtn.addEventListener("click", openSettings);
+profileBtnTop.addEventListener("click", openSettings);
+closeSettings.addEventListener("click", closeSettingsPanel);
+
+settingsOverlay.addEventListener("click", (e) => {
+    if (e.target === settingsOverlay) closeSettingsPanel();
+});
+
+
+/* =========================================================
+   LOGOUT
+   ========================================================= */
+
+logoutBtn.addEventListener("click", () => {
+    logoutModal.classList.add("show");
+});
+
+cancelLogout.addEventListener("click", () => {
+    logoutModal.classList.remove("show");
+});
+
+confirmLogout.addEventListener("click", async () => {
+    logoutModal.classList.remove("show");
+    settingsOverlay.classList.remove("show");
+    try {
+        stopInactivityWatch();
+        await signOut(auth);
+        window.location.replace("login.html");
+    } catch (err) {
+        alert("Logout failed: " + err.message);
+    }
+});
+
+
+/* =========================================================
+   INPUT
+   ========================================================= */
+
+messageInput.addEventListener("input", () => {
+    messageInput.style.height = "auto";
+    messageInput.style.height =
+        Math.min(messageInput.scrollHeight, 140) + "px";
+    sendBtn.disabled = messageInput.value.trim().length === 0;
+});
+
+messageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (!sendBtn.disabled) sendMessage();
+    }
+});
+
+sendBtn.addEventListener("click", sendMessage);
+stopBtn.addEventListener("click", () => {
+    if (currentAbort) currentAbort.abort();
+});
+
+
+/* =========================================================
+   SEND MESSAGE
+   ========================================================= */
+
+async function sendMessage() {
+
+    const text = messageInput.value.trim();
+    if (!text) return;
+
+    const user = auth.currentUser;
+    if (!user) return;
+
+    welcome.style.display = "none";
+
+    addMessage(text, "user");
+
+    messageInput.value = "";
+    messageInput.style.height = "auto";
+    sendBtn.disabled = true;
+
+    updateChatTitle(text);
+
+    /* Ensure chat exists + save user message */
+    try {
+        if (!currentChatId) {
+            currentChatId = await createChat(user.uid);
+        }
+        await saveMessage(user.uid, currentChatId, "user", text);
+    } catch (err) {
+        console.error("save user message failed:", err);
+    }
+
+    /* Load history for the Worker */
+    let history = [];
+    try {
+        history = await loadMessages(user.uid, currentChatId);
+    } catch (err) {
+        console.error("load history failed:", err);
+    }
+
+    /* Prepare assistant bubble + stop button */
+    const assistantEl = addMessage("", "assistant");
+    const contentEl   = assistantEl.querySelector(".message-content");
+
+    let replyText = "";
+    let firstDelta = false;
+
+    stopBtn.hidden = false;
+    sendBtn.hidden = true;
+
+    ThinkingUI.show("thinking");
+
+    currentAbort = new AbortController();
+
+    try {
+
+        await streamChat({
+            messages: history.map(m => ({ role: m.role, content: m.text })),
+            settings: {},
+            signal: currentAbort.signal,
+            onEvent: (evt) => {
+
+                if (evt.type === "status" && typeof evt.state === "string") {
+                    ThinkingUI.setState(evt.state);
+                }
+
+                if (evt.type === "delta" && typeof evt.text === "string") {
+                    if (!firstDelta) {
+                        firstDelta = true;
+                        ThinkingUI.hide();
+                    }
+                    replyText += evt.text;
+                    renderAssistantContent(contentEl, replyText);
+                    if (autoScroll) scrollToBottom();
+                }
+
+                if (evt.type === "error") {
+                    console.error("worker stream error:", evt);
+                }
+            }
+        });
+
+    } catch (err) {
+
+        if (err.name === "AbortError") {
+            replyText += replyText ? "\n\n[stopped]" : "[stopped]";
+            renderAssistantContent(contentEl, replyText);
+        } else {
+            console.error("streamChat failed:", err);
+            replyText = "Sorry — I could not respond. " + err.message;
+            renderAssistantContent(contentEl, replyText);
+        }
+
+    } finally {
+        ThinkingUI.hide();
+        stopBtn.hidden = true;
+        sendBtn.hidden = false;
+        currentAbort = null;
+    }
+
+    if (!replyText.trim()) {
+        assistantEl.remove();
+        return;
+    }
+
+    addCopyButton(assistantEl, replyText);
+
+    try {
+        await saveMessage(user.uid, currentChatId, "assistant", replyText);
+    } catch (err) {
+        console.error("save assistant message failed:", err);
+    }
+}
+
+
+/* =========================================================
+   MESSAGE RENDERING
+   ========================================================= */
+
+function addMessage(text, role) {
+
+    const el = document.createElement("div");
+    el.className = "message " + String(role).toLowerCase();
+
+    if (role === "assistant") {
+        const icon = document.createElement("div");
+        icon.className = "ai-icon";
+        icon.textContent = "✦";
+        el.appendChild(icon);
+    }
+
+    const content = document.createElement("div");
+    content.className = "message-content";
+
+    if (role === "assistant") {
+        content.textContent = text;
+    } else {
+        content.textContent = text;
+    }
+
+    el.appendChild(content);
+    messages.appendChild(el);
+
+    if (autoScroll) scrollToBottom();
+    return el;
+}
+
+
+/* Assistant content: textContent for streaming, but we render
+   markdown once streaming is done. During stream we use text. */
+function renderAssistantContent(contentEl, text) {
+    contentEl.textContent = text;
+}
+
+function renderAssistantMarkdown(assistantEl, text) {
+    const contentEl = assistantEl.querySelector(".message-content");
+    contentEl.innerHTML = markdownToHtml(text);
+}
+
+
+/* =========================================================
+   MINIMAL MARKDOWN → HTML
+   Escapes HTML first, then applies markdown patterns.
+   ========================================================= */
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function markdownToHtml(raw) {
+
+    let text = String(raw);
+
+    /* Extract fenced code blocks first */
+    const codeBlocks = [];
+    text = text.replace(/```([a-zA-Z0-9]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+        const idx = codeBlocks.length;
+        codeBlocks.push(
+            `<div class="code-block"><code>${escapeHtml(code.replace(/\n$/, ""))}</code></div>`
+        );
+        return "\u0000CODE" + idx + "\u0000";
+    });
+
+    /* Escape everything else */
+    text = escapeHtml(text);
+
+    /* Headings */
+    text = text.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+    text = text.replace(/^## (.+)$/gm,  "<h2>$1</h2>");
+    text = text.replace(/^# (.+)$/gm,   "<h1>$1</h1>");
+
+    /* Bold + italic */
+    text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+
+    /* Inline code */
+    text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    /* Links */
+    text = text.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+    /* Simple tables: | a | b |\n|---|---|\n| c | d | */
+    text = text.replace(/((?:^\|.*\|\s*\n)+)/gm, (block) => {
+        const lines = block.trim().split("\n");
+        if (lines.length < 2) return block;
+        const isSep = /^\|[\s:|-]+\|$/.test(lines[1]);
+        if (!isSep) return block;
+        const header = lines[0].split("|").slice(1, -1).map(c => c.trim());
+        const body = lines.slice(2).map(row =>
+            row.split("|").slice(1, -1).map(c => c.trim())
+        );
+        let html = "<table><thead><tr>";
+        header.forEach(h => html += `<th>${h}</th>`);
+        html += "</tr></thead><tbody>";
+        body.forEach(r => {
+            html += "<tr>";
+            r.forEach(c => html += `<td>${c}</td>`);
+            html += "</tr>";
+        });
+        html += "</tbody></table>";
+        return html;
+    });
+
+    /* Bullet lists */
+    text = text.replace(/(?:^- .+\n?)+/gm, (block) => {
+        const items = block.trim().split("\n")
+            .map(l => l.replace(/^- /, "").trim())
+            .map(i => `<li>${i}</li>`).join("");
+        return `<ul>${items}</ul>`;
+    });
+
+    /* Numbered lists */
+    text = text.replace(/(?:^\d+\. .+\n?)+/gm, (block) => {
+        const items = block.trim().split("\n")
+            .map(l => l.replace(/^\d+\. /, "").trim())
+            .map(i => `<li>${i}</li>`).join("");
+        return `<ol>${items}</ol>`;
+    });
+
+    /* Paragraphs: double newlines */
+    text = text.split(/\n{2,}/).map(seg => {
+        const t = seg.trim();
+        if (!t) return "";
+        if (/^<(h[1-3]|ul|ol|table|div|pre)/.test(t)) return t;
+        return `<p>${t.replace(/\n/g, "<br>")}</p>`;
+    }).join("");
+
+    /* Restore code blocks */
+    text = text.replace(/\u0000CODE(\d+)\u0000/g, (_, i) => codeBlocks[+i] || "");
+
+    return text;
+}
+
+
+/* ---------- COPY BUTTON ---------- */
+
+function addCopyButton(assistantEl, text) {
+    const btn = document.createElement("button");
+    btn.className = "copy-btn";
+    btn.type = "button";
+    btn.textContent = "Copy";
+
+    btn.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = "Copied";
+            btn.classList.add("copied");
+            setTimeout(() => {
+                btn.textContent = "Copy";
+                btn.classList.remove("copied");
+            }, 1400);
+        } catch {
+            /* clipboard blocked */
+        }
+    });
+
+    assistantEl.querySelector(".message-content").appendChild(btn);
+}
+
+
+/* =========================================================
+   THINKING UI
+   ========================================================= */
+
+const ThinkingUI = (() => {
+
+    const STATES = {
+        thinking:      "DavAI is thinking…",
+        understanding: "Understanding your question…",
+        analyzing:     "Analyzing the problem…",
+        researching:   "Researching relevant information…",
+        checking:      "Checking available information…",
+        comparing:     "Comparing findings…",
+        preparing:     "Preparing the response…"
+    };
+
+    let current = null;
+
+    function show(key = "thinking") {
+        thinking.classList.add("show");
+        current = null;
+        setState(key, true);
+        if (autoScroll) scrollToBottom();
+    }
+
+    function hide() {
+        thinking.classList.remove("show");
+        current = null;
+    }
+
+    function setState(key, immediate = false) {
+        if (current === key) return;
+        if (!(key in STATES)) return;
+        current = key;
+        const text = STATES[key];
+
+        if (immediate) {
+            thinkingLabel.textContent = text;
+            thinkingLabel.style.opacity = "1";
+            return;
+        }
+
+        thinkingLabel.style.opacity = "0";
+        setTimeout(() => {
+            thinkingLabel.textContent = text;
+            thinkingLabel.style.opacity = "1";
+        }, 140);
+    }
+
+    return { show, hide, setState, STATES };
+})();
+
+
+/* =========================================================
+   SCROLL
+   ========================================================= */
+
+function scrollToBottom() {
+    setTimeout(() => {
+        chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: "smooth" });
+    }, 40);
+}
+
+chatArea.addEventListener("scroll", () => {
+    const nearBottom =
+        chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < 40;
+    autoScroll = nearBottom;
+}, { passive: true });
+
+
+/* =========================================================
+   TITLE
+   ========================================================= */
+
+function updateChatTitle(text) {
+    /* Sidebar title handled by watchChats */
+}
+
+
+/* =========================================================
+   NEW CHAT
+   ========================================================= */
+
+newChatBtn.addEventListener("click", () => {
+    currentChatId = null;
+
+    messages.innerHTML = "";
+    messages.appendChild(welcome);
+    welcome.style.display = "flex";
+
+    messageInput.value = "";
+    messageInput.style.height = "auto";
+    sendBtn.disabled = true;
+
+    ThinkingUI.hide();
+
+    document.querySelectorAll(".history-item")
+        .forEach(el => el.classList.remove("active"));
+
+    closeSidebar();
+});
+
+
+/* =========================================================
+   DB HELPERS
+   ========================================================= */
+
+function chatsRoot(uid)                { return ref(db, `users/${uid}/chats`); }
+function chatMetaRef(uid, id)          { return ref(db, `users/${uid}/chats/${id}/meta`); }
+function chatMessagesRef(uid, id)      { return ref(db, `users/${uid}/chats/${id}/messages`); }
+
+
+async function createChat(uid) {
+    const idRef  = push(chatsRoot(uid));
+    const chatId = idRef.key;
+    await set(chatMetaRef(uid, chatId), {
+        title:        "",
+        createdAt:    serverTimestamp(),
+        updatedAt:    serverTimestamp(),
+        messageCount: 0
+    });
+    return chatId;
+}
+
+
+async function saveMessage(uid, chatId, role, text) {
+    const msgRef = push(chatMessagesRef(uid, chatId));
+    await set(msgRef, { role, text, ts: serverTimestamp() });
+
+    const snap = await get(chatMetaRef(uid, chatId));
+    const meta = snap.val() || {};
+
+    const updates = {
+        updatedAt:    serverTimestamp(),
+        messageCount: (meta.messageCount || 0) + 1
+    };
+    if (role === "user" && !meta.title) {
+        updates.title = text.length > 40 ? text.slice(0, 40) + "…" : text;
+    }
+    await update(chatMetaRef(uid, chatId), updates);
+}
+
+
+async function loadMessages(uid, chatId) {
+    const snap = await get(chatMessagesRef(uid, chatId));
+    const out = [];
+    snap.forEach((c) => {
+        const v = c.val();
+        out.push({ id: c.key, role: v.role, text: v.text, ts: v.ts || 0 });
+    });
+    out.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    return out;
+}
+
+
+function watchChats(uid, callback) {
+    return onValue(chatsRoot(uid), (snap) => {
+        const list = [];
+        snap.forEach((c) => {
+            const v    = c.val() || {};
+            const meta = v.meta || {};
+            list.push({
+                id:           c.key,
+                title:        meta.title || "New conversation",
+                updatedAt:    meta.updatedAt || 0,
+                messageCount: meta.messageCount || 0
+            });
+        });
+        list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        callback(list);
+    });
+}
+
+
+async function deleteChat(uid, chatId) {
+    await remove(ref(db, `users/${uid}/chats/${chatId}`));
+}
+
+
+/* =========================================================
+   SIDEBAR LIST
+   ========================================================= */
+
+function renderChatList(list) {
+    chatHistory.innerHTML = "";
+    if (!list.length) return;
+
+    list.forEach((chat) => {
+        const item = document.createElement("div");
+        item.className = "history-item";
+        if (chat.id === currentChatId) item.classList.add("active");
+        item.dataset.id = chat.id;
+
+        const label = document.createElement("span");
+        label.className = "history-label";
+        label.textContent = chat.title;
+
+        const kebab = document.createElement("button");
+        kebab.className = "history-kebab";
+        kebab.type = "button";
+        kebab.dataset.id = chat.id;
+        kebab.textContent = "\u22EE";
+
+        item.appendChild(label);
+        item.appendChild(kebab);
+        chatHistory.appendChild(item);
+    });
+}
+
+
+function openChatMenu(btn, chatId) {
+    menuTargetChatId = chatId;
+    const rect = btn.getBoundingClientRect();
+    chatMenu.style.top  = (rect.bottom + 4) + "px";
+    chatMenu.style.left = Math.max(8, rect.right - 130) + "px";
+    chatMenu.classList.add("show");
+}
+
+function closeChatMenu() {
+    chatMenu.classList.remove("show");
+    menuTargetChatId = null;
+}
+
+chatHistory.addEventListener("click", async (e) => {
+    const kebab = e.target.closest(".history-kebab");
+    if (kebab) {
+        e.stopPropagation();
+        openChatMenu(kebab, kebab.dataset.id);
+        return;
+    }
+
+    const item = e.target.closest(".history-item");
+    if (!item) return;
+
+    const chatId = item.dataset.id;
+    if (!chatId) return;
+
+    const user = auth.currentUser;
+    if (!user) return;
+
+    document.querySelectorAll(".history-item")
+        .forEach(el => el.classList.remove("active"));
+    item.classList.add("active");
+
+    closeSidebar();
+
+    await loadChatIntoView(user.uid, chatId);
+});
+
+document.addEventListener("click", (e) => {
+    if (!chatMenu.contains(e.target) && !e.target.closest(".history-kebab")) {
+        closeChatMenu();
+    }
+});
+
+chatHistory.addEventListener("scroll", closeChatMenu, { passive: true });
+
+deleteChatBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const chatId = menuTargetChatId;
+    closeChatMenu();
+    if (!chatId) return;
+
+    const user = auth.currentUser;
+    if (!user) return;
+
+    try {
+        await deleteChat(user.uid, chatId);
+    } catch (err) {
+        alert("Delete failed: " + err.message);
+        return;
+    }
+
+    if (currentChatId === chatId) {
+        currentChatId = null;
+        messages.innerHTML = "";
+        messages.appendChild(welcome);
+        welcome.style.display = "flex";
+        ThinkingUI.hide();
+    }
+});
+
+
+/* =========================================================
+   LOAD CHAT INTO VIEW
+   ========================================================= */
+
+async function loadChatIntoView(uid, chatId) {
+    currentChatId = chatId;
+    ThinkingUI.hide();
+
+    messages.innerHTML = "";
+
+    let list = [];
+    try {
+        list = await loadMessages(uid, chatId);
+    } catch (err) {
+        console.error("loadMessages failed:", err);
+    }
+
+    if (!list.length) {
+        messages.appendChild(welcome);
+        welcome.style.display = "flex";
+        return;
+    }
+
+    welcome.style.display = "none";
+
+    list.forEach((m) => {
+        if (m.role === "assistant") {
+            const el = addMessage("", "assistant");
+            renderAssistantMarkdown(el, m.text);
+            addCopyButton(el, m.text);
+        } else {
+            addMessage(m.text, "user");
+        }
+    });
+
+    scrollToBottom();
+}
+
+
+/* =========================================================
+   AUTH GUARD + PROFILE
+   ========================================================= */
+
+onAuthStateChanged(auth, (user) => {
+
+    if (!user) {
+        stopInactivityWatch();
+        if (chatsUnsub) { chatsUnsub(); chatsUnsub = null; }
+        window.location.replace("login.html");
+        return;
+    }
+
+    applyRealProfile(user);
+    startInactivityWatch();
+
+    if (chatsUnsub) chatsUnsub();
+    chatsUnsub = watchChats(user.uid, renderChatList);
+
+    loadAvatarFromDB(user.uid);
+
+    markReady();
+});
+
+
+function applyRealProfile(user) {
+
+    const name =
+        user.displayName ||
+        (user.email ? user.email.split("@")[0] : "User");
+
+    const email = user.email || "";
+
+    const initials =
+        name.split(/\s+/).filter(Boolean).slice(0, 2)
+            .map(w => w[0].toUpperCase()).join("") || "U";
+
+    PROFILE.name     = name;
+    PROFILE.email    = email;
+    PROFILE.initials = initials;
+
+    avatarTop.textContent    = initials;
+    avatarSmall.textContent  = initials;
+    avatarLarge.textContent  = initials;
+
+    profileNameSmall.textContent  = name;
+    profileEmailSmall.textContent = email;
+    profileNameLarge.textContent  = name;
+    profileEmailLarge.textContent = email;
+    accountName.textContent       = name;
+    accountEmail.textContent      = email;
+}
+
+
+/* =========================================================
+   AVATAR (Cloudinary)
+   ========================================================= */
+
+function setAvatarElement(el, url) {
+    el.innerHTML = `<img src="${url}" alt="">`;
+}
+
+async function loadAvatarFromDB(uid) {
+    try {
+        const snap = await get(ref(db, `users/${uid}/profile/photoURL`));
+        if (!snap.exists()) return;
+        const url = snap.val();
+        [avatarTop, avatarSmall, avatarLarge].forEach(el => setAvatarElement(el, url));
+    } catch (err) {
+        console.warn("avatar load failed:", err.message);
+    }
+}
+
+function showUpload(state) {
+    if (state) {
+        uploadBar.style.width = "0%";
+        uploadLabel.textContent = "Uploading…";
+        uploadOverlay.classList.add("show");
+    } else {
+        uploadOverlay.classList.remove("show");
+    }
+}
+
+changePictureBtn.addEventListener("click", () => avatarInput.click());
+avatarLarge.addEventListener("click", () => avatarInput.click());
+avatarLarge.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        avatarInput.click();
+    }
+});
+
+avatarInput.addEventListener("change", async () => {
+    const file = avatarInput.files && avatarInput.files[0];
+    avatarInput.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+        alert("Please select an image file.");
+        return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+        alert("Image must be under 5 MB.");
+        return;
+    }
+
+    const user = auth.currentUser;
+    if (!user) return;
+
+    showUpload(true);
+
+    try {
+        const url = await uploadToCloudinary(file, (pct) => {
+            uploadBar.style.width = pct + "%";
+        });
+
+        uploadLabel.textContent = "Saving…";
+        uploadBar.style.width = "100%";
+
+        await set(ref(db, `users/${user.uid}/profile/photoURL`), url);
+        await set(ref(db, `users/${user.uid}/profile/updatedAt`), serverTimestamp());
+
+        [avatarTop, avatarSmall, avatarLarge].forEach(el => setAvatarElement(el, url));
+
+        setTimeout(() => showUpload(false), 300);
+    } catch (err) {
+        showUpload(false);
+        alert("Upload failed: " + err.message);
+    }
+});
+
+function uploadToCloudinary(file, onProgress) {
+    return new Promise((resolve, reject) => {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("upload_preset", CLOUDINARY_PRESET);
+        form.append("folder", "davai/avatars");
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST",
+            `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`);
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) {
+                onProgress(Math.round((e.loaded / e.total) * 100));
+            }
+        };
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    if (data.secure_url) resolve(data.secure_url);
+                    else reject(new Error("No secure_url"));
+                } catch {
+                    reject(new Error("Invalid Cloudinary response"));
+                }
+            } else reject(new Error("Cloudinary HTTP " + xhr.status));
+        };
+        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.send(form);
+    });
+}
+
+
+/* =========================================================
+   INACTIVITY AUTO-LOGOUT
+   ========================================================= */
+
+let inactivityTimer = null;
+let lastReset = 0;
+
+const ACTIVITY_EVENTS = [
+    "mousemove", "mousedown", "keydown",
+    "scroll", "touchstart", "click"
+];
+
+function resetInactivityTimer() {
+    const now = Date.now();
+    if (now - lastReset < 1000) return;
+    lastReset = now;
+    clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(async () => {
+        try { await signOut(auth); } catch {}
+        window.location.replace("login.html?reason=inactivity");
+    }, INACTIVITY_MS);
+}
+
+function startInactivityWatch() {
+    ACTIVITY_EVENTS.forEach(evt => {
+        document.addEventListener(evt, resetInactivityTimer, { passive: true });
+    });
+    resetInactivityTimer();
+}
+
+function stopInactivityWatch() {
+    ACTIVITY_EVENTS.forEach(evt => {
+        document.removeEventListener(evt, resetInactivityTimer);
+    });
+    clearTimeout(inactivityTimer);
+}
