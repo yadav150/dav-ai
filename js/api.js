@@ -7,7 +7,7 @@ import { getIdToken }
     from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 
 
-const WORKER_BASE = "https://davai-worker.yadavsubba2003.workers.dev";
+const WORKER_BASE = "https://dav-ai-worker.yadavsubba2003.workers.dev";
 
 
 async function authHeader() {
