@@ -890,6 +890,46 @@ body {
     text-align: right;
 }
 
+.setting-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--panel);
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+        calc(100% - 14px) center,
+        calc(100% - 9px) center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 30px 7px 12px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    outline: none;
+    min-width: 130px;
+    transition: border-color 0.15s ease;
+}
+
+.setting-select:hover {
+    border-color: var(--border-2);
+}
+
+.setting-select:focus {
+    border-color: var(--header);
+}
+
+@media (max-width: 480px) {
+    .setting-select {
+        min-width: 110px;
+        font-size: 12.5px;
+        padding: 6px 26px 6px 10px;
+    }
+}
+
 .logout-button {
     width: 100%;
     height: 44px;
