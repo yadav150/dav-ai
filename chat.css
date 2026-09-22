@@ -200,10 +200,18 @@ body {
 }
 
 .sidebar-brand {
-    font-size: 17px;
-    font-weight: 700;
-    color: var(--header);
-    letter-spacing: -0.2px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex: 1;
+}
+
+.sidebar-brand-img {
+    height: 28px;
+    max-width: 140px;
+    width: auto;
+    object-fit: contain;
+    display: block;
 }
 
 .sidebar-close {
